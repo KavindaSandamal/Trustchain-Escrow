@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
-import { Wallet, FileText, PlusCircle, AlertCircle } from 'lucide-react';
+import { Wallet, FileText, PlusCircle, AlertCircle, Shield } from 'lucide-react';
 import {
   connectWallet,
   formatAddress,
@@ -12,6 +12,7 @@ import CreateProject from './components/CreateProject';
 import ProjectList from './components/ProjectList';
 import ProjectDetail from './components/ProjectDetail';
 import MyProjects from './components/MyProjects';
+import AdminDashboard from './components/AdminDashboard';
 
 function App() {
   const [account, setAccount] = useState('');
@@ -87,6 +88,13 @@ function App() {
                 >
                   My Projects
                 </Link>
+                <Link
+                  to="/admin"
+                  className="flex items-center space-x-1 text-gray-700 hover:text-blue-600 transition"
+                >
+                  <Shield className="w-4 h-4" />
+                  <span>Admin</span>
+                </Link>
               </div>
 
               <div>
@@ -159,6 +167,10 @@ function App() {
               <Route
                 path="/my-projects"
                 element={<MyProjects account={account} />}
+              />
+              <Route
+                path="/admin"
+                element={<AdminDashboard account={account} />}
               />
             </Routes>
           )}

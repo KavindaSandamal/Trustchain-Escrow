@@ -3,12 +3,13 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 
 /**
- * @title ProjectEscrow
- * @dev Smart contract for freelance escrow with milestone-based payments
+ * @title ProjectEscrowImproved
+ * @dev Enhanced escrow with auto-approval, multi-admin disputes, and emergency pause
  */
-contract ProjectEscrow is ReentrancyGuard, Ownable {
+contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
     // Enums for different states
     enum ProjectStatus {
         CREATED,
@@ -31,7 +32,7 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         uint256 amount;
         uint256 deadline;
         MilestoneStatus status;
-        string deliverableHash; // IPFS hash of work submitted
+        string deliverableHash;
         uint256 submittedAt;
     }
 
@@ -41,7 +42,7 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         address payable client;
         address payable freelancer;
         string title;
-        string descriptionHash; // IPFS hash
+        string descriptionHash;
         uint256 totalAmount;
         ProjectStatus status;
         uint256 createdAt;
@@ -49,7 +50,7 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         bool fundsDeposited;
     }
 
-    // Dispute structure
+    // Dispute structure with voting
     struct Dispute {
         uint256 projectId;
         uint256 milestoneId;
@@ -57,21 +58,28 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         string reason;
         bool isResolved;
         uint256 createdAt;
+        mapping(address => bool) hasVoted;
+        mapping(address => uint256) votes; // admin => percentage to freelancer
+        uint256 voteCount;
     }
 
     // State variables
     uint256 public projectCounter;
     uint256 public disputeCounter;
-    uint256 public platformFeePercent = 2; // 2% platform fee
+    uint256 public platformFeePercent = 2;
     uint256 public constant DISPUTE_TIMEOUT = 3 days;
+    uint256 public constant AUTO_APPROVE_TIMEOUT = 7 days; // NEW: Auto-approval after 7 days
+    uint256 public constant REQUIRED_ADMIN_VOTES = 2; // NEW: 2 out of 3 admins
 
     // Mappings
     mapping(uint256 => Project) public projects;
     mapping(uint256 => Milestone[]) public projectMilestones;
     mapping(uint256 => Dispute) public disputes;
     mapping(address => uint256[]) public userProjects;
-    mapping(address => uint256) public userRatings; // Total rating points
-    mapping(address => uint256) public userRatingCount; // Number of ratings
+    mapping(address => uint256) public userRatings;
+    mapping(address => uint256) public userRatingCount;
+    mapping(address => bool) public isAdmin; // NEW: Multi-admin system
+    address[] public adminList; // NEW: List of admins
 
     // Events
     event ProjectCreated(
@@ -90,6 +98,7 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         string deliverableHash
     );
     event MilestoneApproved(uint256 indexed projectId, uint256 milestoneId);
+    event MilestoneAutoApproved(uint256 indexed projectId, uint256 milestoneId); // NEW
     event PaymentReleased(
         uint256 indexed projectId,
         uint256 milestoneId,
@@ -100,11 +109,20 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         uint256 indexed projectId,
         address initiator
     );
+    event DisputeVoted(
+        uint256 indexed disputeId,
+        address indexed admin,
+        uint256 percentage
+    ); // NEW
     event DisputeResolved(
         uint256 indexed disputeId,
         uint256 percentageToFreelancer
     );
     event UserRated(address indexed user, uint256 rating);
+    event AdminAdded(address indexed admin); // NEW
+    event AdminRemoved(address indexed admin); // NEW
+    event ContractPaused(address indexed by); // NEW
+    event ContractUnpaused(address indexed by); // NEW
 
     // Modifiers
     modifier onlyClient(uint256 _projectId) {
@@ -137,6 +155,64 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         _;
     }
 
+    modifier onlyAdmin() {
+        require(
+            isAdmin[msg.sender] || msg.sender == owner(),
+            "Only admin can call this"
+        );
+        _;
+    }
+
+    constructor() Ownable() {
+        // Add contract deployer as first admin
+        isAdmin[msg.sender] = true;
+        adminList.push(msg.sender);
+    }
+
+    // NEW: Admin management functions
+    function addAdmin(address _admin) external onlyOwner {
+        require(!isAdmin[_admin], "Already an admin");
+        require(_admin != address(0), "Invalid address");
+
+        isAdmin[_admin] = true;
+        adminList.push(_admin);
+
+        emit AdminAdded(_admin);
+    }
+
+    function removeAdmin(address _admin) external onlyOwner {
+        require(isAdmin[_admin], "Not an admin");
+        require(adminList.length > 1, "Cannot remove last admin");
+
+        isAdmin[_admin] = false;
+
+        // Remove from adminList
+        for (uint256 i = 0; i < adminList.length; i++) {
+            if (adminList[i] == _admin) {
+                adminList[i] = adminList[adminList.length - 1];
+                adminList.pop();
+                break;
+            }
+        }
+
+        emit AdminRemoved(_admin);
+    }
+
+    function getAdminList() external view returns (address[] memory) {
+        return adminList;
+    }
+
+    // NEW: Emergency pause functions
+    function pause() external onlyOwner {
+        _pause();
+        emit ContractPaused(msg.sender);
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+        emit ContractUnpaused(msg.sender);
+    }
+
     /**
      * @dev Create a new project with milestones
      */
@@ -146,7 +222,7 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         string[] memory _milestoneDescriptions,
         uint256[] memory _milestoneAmounts,
         uint256[] memory _milestoneDeadlines
-    ) external payable returns (uint256) {
+    ) external payable whenNotPaused returns (uint256) {
         require(
             _milestoneDescriptions.length > 0,
             "At least one milestone required"
@@ -157,7 +233,6 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
             "Milestone arrays must be same length"
         );
 
-        // Calculate total amount
         uint256 totalAmount = 0;
         for (uint256 i = 0; i < _milestoneAmounts.length; i++) {
             require(_milestoneAmounts[i] > 0, "Milestone amount must be > 0");
@@ -170,7 +245,6 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
 
         require(msg.value >= totalAmount, "Insufficient funds deposited");
 
-        // Create project
         uint256 projectId = projectCounter++;
         Project storage newProject = projects[projectId];
         newProject.id = projectId;
@@ -182,7 +256,6 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         newProject.createdAt = block.timestamp;
         newProject.fundsDeposited = true;
 
-        // Create milestones
         for (uint256 i = 0; i < _milestoneDescriptions.length; i++) {
             Milestone memory milestone = Milestone({
                 description: _milestoneDescriptions[i],
@@ -195,10 +268,8 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
             projectMilestones[projectId].push(milestone);
         }
 
-        // Track user projects
         userProjects[msg.sender].push(projectId);
 
-        // Refund excess funds
         if (msg.value > totalAmount) {
             payable(msg.sender).transfer(msg.value - totalAmount);
         }
@@ -214,7 +285,7 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
      */
     function acceptProject(
         uint256 _projectId
-    ) external projectExists(_projectId) {
+    ) external projectExists(_projectId) whenNotPaused {
         Project storage project = projects[_projectId];
         require(
             project.status == ProjectStatus.CREATED,
@@ -242,7 +313,12 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         uint256 _projectId,
         uint256 _milestoneId,
         string memory _deliverableHash
-    ) external projectExists(_projectId) onlyFreelancer(_projectId) {
+    )
+        external
+        projectExists(_projectId)
+        onlyFreelancer(_projectId)
+        whenNotPaused
+    {
         Project storage project = projects[_projectId];
         require(project.status == ProjectStatus.ACTIVE, "Project not active");
         require(
@@ -275,7 +351,13 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
     function approveMilestone(
         uint256 _projectId,
         uint256 _milestoneId
-    ) external projectExists(_projectId) onlyClient(_projectId) nonReentrant {
+    )
+        external
+        projectExists(_projectId)
+        onlyClient(_projectId)
+        nonReentrant
+        whenNotPaused
+    {
         Project storage project = projects[_projectId];
         require(project.status == ProjectStatus.ACTIVE, "Project not active");
         require(
@@ -291,20 +373,60 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
             "Milestone not submitted"
         );
 
+        _releaseMilestonePayment(project, milestone, _projectId, _milestoneId);
+    }
+
+    /**
+     * @dev NEW: Auto-approve milestone if client hasn't responded in 7 days
+     * Anyone can call this function
+     */
+    function autoApproveMilestone(
+        uint256 _projectId,
+        uint256 _milestoneId
+    ) external projectExists(_projectId) nonReentrant whenNotPaused {
+        Project storage project = projects[_projectId];
+        require(project.status == ProjectStatus.ACTIVE, "Project not active");
+        require(
+            _milestoneId < projectMilestones[_projectId].length,
+            "Invalid milestone"
+        );
+
+        Milestone storage milestone = projectMilestones[_projectId][
+            _milestoneId
+        ];
+        require(
+            milestone.status == MilestoneStatus.SUBMITTED,
+            "Milestone not submitted"
+        );
+        require(
+            block.timestamp >= milestone.submittedAt + AUTO_APPROVE_TIMEOUT,
+            "Auto-approval timeout not reached"
+        );
+
+        emit MilestoneAutoApproved(_projectId, _milestoneId);
+        _releaseMilestonePayment(project, milestone, _projectId, _milestoneId);
+    }
+
+    /**
+     * @dev Internal function to release milestone payment
+     */
+    function _releaseMilestonePayment(
+        Project storage project,
+        Milestone storage milestone,
+        uint256 _projectId,
+        uint256 _milestoneId
+    ) internal {
         milestone.status = MilestoneStatus.APPROVED;
 
-        // Calculate platform fee
         uint256 platformFee = (milestone.amount * platformFeePercent) / 100;
         uint256 freelancerAmount = milestone.amount - platformFee;
 
-        // Transfer funds
         project.freelancer.transfer(freelancerAmount);
         payable(owner()).transfer(platformFee);
 
         emit MilestoneApproved(_projectId, _milestoneId);
         emit PaymentReleased(_projectId, _milestoneId, freelancerAmount);
 
-        // Check if all milestones are approved
         if (allMilestonesApproved(_projectId)) {
             project.status = ProjectStatus.COMPLETED;
         }
@@ -321,6 +443,7 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         external
         projectExists(_projectId)
         onlyParticipant(_projectId)
+        whenNotPaused
         returns (uint256)
     {
         Project storage project = projects[_projectId];
@@ -350,6 +473,7 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         dispute.reason = _reason;
         dispute.isResolved = false;
         dispute.createdAt = block.timestamp;
+        dispute.voteCount = 0;
 
         project.status = ProjectStatus.DISPUTED;
         milestone.status = MilestoneStatus.DISPUTED;
@@ -360,16 +484,52 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
     }
 
     /**
-     * @dev Admin resolves dispute (can be enhanced with voting mechanism)
+     * @dev NEW: Multi-admin dispute voting system
      */
-    function resolveDispute(
+    function voteOnDispute(
         uint256 _disputeId,
         uint256 _percentageToFreelancer
-    ) external onlyOwner nonReentrant {
+    ) external onlyAdmin whenNotPaused {
         require(_disputeId < disputeCounter, "Dispute does not exist");
         Dispute storage dispute = disputes[_disputeId];
         require(!dispute.isResolved, "Dispute already resolved");
         require(_percentageToFreelancer <= 100, "Invalid percentage");
+        require(!dispute.hasVoted[msg.sender], "Already voted");
+
+        dispute.hasVoted[msg.sender] = true;
+        dispute.votes[msg.sender] = _percentageToFreelancer;
+        dispute.voteCount++;
+
+        emit DisputeVoted(_disputeId, msg.sender, _percentageToFreelancer);
+
+        // If enough votes, execute resolution
+        if (dispute.voteCount >= REQUIRED_ADMIN_VOTES) {
+            _executeDisputeResolution(_disputeId);
+        }
+    }
+
+    /**
+     * @dev NEW: Execute dispute resolution based on average of votes
+     */
+    function _executeDisputeResolution(
+        uint256 _disputeId
+    ) internal nonReentrant {
+        Dispute storage dispute = disputes[_disputeId];
+        require(!dispute.isResolved, "Already resolved");
+
+        // Calculate average percentage from all votes
+        uint256 totalPercentage = 0;
+        uint256 validVotes = 0;
+
+        for (uint256 i = 0; i < adminList.length; i++) {
+            address admin = adminList[i];
+            if (dispute.hasVoted[admin]) {
+                totalPercentage += dispute.votes[admin];
+                validVotes++;
+            }
+        }
+
+        uint256 avgPercentage = totalPercentage / validVotes;
 
         uint256 projectId = dispute.projectId;
         uint256 milestoneId = dispute.milestoneId;
@@ -377,12 +537,9 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         Project storage project = projects[projectId];
         Milestone storage milestone = projectMilestones[projectId][milestoneId];
 
-        // Calculate amounts
-        uint256 freelancerAmount = (milestone.amount *
-            _percentageToFreelancer) / 100;
+        uint256 freelancerAmount = (milestone.amount * avgPercentage) / 100;
         uint256 clientAmount = milestone.amount - freelancerAmount;
 
-        // Transfer funds
         if (freelancerAmount > 0) {
             project.freelancer.transfer(freelancerAmount);
         }
@@ -390,21 +547,19 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
             project.client.transfer(clientAmount);
         }
 
-        // Update states
         dispute.isResolved = true;
-        milestone.status = MilestoneStatus.APPROVED; // Mark as resolved
+        milestone.status = MilestoneStatus.APPROVED;
         project.status = ProjectStatus.ACTIVE;
 
-        emit DisputeResolved(_disputeId, _percentageToFreelancer);
+        emit DisputeResolved(_disputeId, avgPercentage);
     }
 
     /**
      * @dev Rate a user after project completion
      */
-    function rateUser(address _user, uint256 _rating) external {
+    function rateUser(address _user, uint256 _rating) external whenNotPaused {
         require(_rating >= 1 && _rating <= 5, "Rating must be between 1 and 5");
 
-        // Simple rating system - can be enhanced to verify project completion
         userRatings[_user] += _rating;
         userRatingCount[_user]++;
 
@@ -416,7 +571,13 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
      */
     function cancelProject(
         uint256 _projectId
-    ) external projectExists(_projectId) onlyClient(_projectId) nonReentrant {
+    )
+        external
+        projectExists(_projectId)
+        onlyClient(_projectId)
+        nonReentrant
+        whenNotPaused
+    {
         Project storage project = projects[_projectId];
         require(
             project.status == ProjectStatus.CREATED,
@@ -428,8 +589,6 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
         );
 
         project.status = ProjectStatus.CANCELLED;
-
-        // Refund client
         project.client.transfer(project.totalAmount);
     }
 
@@ -487,5 +646,65 @@ contract ProjectEscrow is ReentrancyGuard, Ownable {
      */
     function getContractBalance() external view returns (uint256) {
         return address(this).balance;
+    }
+
+    /**
+     * @dev NEW: Check if milestone can be auto-approved
+     */
+    function canAutoApprove(
+        uint256 _projectId,
+        uint256 _milestoneId
+    ) external view returns (bool) {
+        if (_projectId >= projectCounter) return false;
+        if (_milestoneId >= projectMilestones[_projectId].length) return false;
+
+        Milestone storage milestone = projectMilestones[_projectId][
+            _milestoneId
+        ];
+
+        return (milestone.status == MilestoneStatus.SUBMITTED &&
+            block.timestamp >= milestone.submittedAt + AUTO_APPROVE_TIMEOUT);
+    }
+
+    /**
+     * @dev NEW: Get dispute voting status
+     */
+    function getDisputeVotes(
+        uint256 _disputeId
+    )
+        external
+        view
+        returns (
+            uint256 voteCount,
+            bool isResolved,
+            address[] memory voters,
+            uint256[] memory percentages
+        )
+    {
+        require(_disputeId < disputeCounter, "Dispute does not exist");
+        Dispute storage dispute = disputes[_disputeId];
+
+        address[] memory tempVoters = new address[](adminList.length);
+        uint256[] memory tempPercentages = new uint256[](adminList.length);
+        uint256 count = 0;
+
+        for (uint256 i = 0; i < adminList.length; i++) {
+            address admin = adminList[i];
+            if (dispute.hasVoted[admin]) {
+                tempVoters[count] = admin;
+                tempPercentages[count] = dispute.votes[admin];
+                count++;
+            }
+        }
+
+        voters = new address[](count);
+        percentages = new uint256[](count);
+
+        for (uint256 i = 0; i < count; i++) {
+            voters[i] = tempVoters[i];
+            percentages[i] = tempPercentages[i];
+        }
+
+        return (dispute.voteCount, dispute.isResolved, voters, percentages);
     }
 }

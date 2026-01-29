@@ -10,6 +10,7 @@ import {
   Calendar,
   User,
 } from 'lucide-react';
+import AutoApproveTimer from './AutoApproveButton.jsx';
 import {
   getContract,
   getReadOnlyContract,
@@ -42,6 +43,12 @@ function ProjectDetail({ account }) {
     try {
       setLoading(true);
       const contract = await getReadOnlyContract();
+
+      const owner = await contract.owner();
+      console.log("Contract Owner:", owner);
+      console.log("Your Address:", account);
+      console.log("Are you owner?", owner.toLowerCase() === account.toLowerCase());
+
 
       const projectData = await contract.projects(id);
       const milestonesData = await contract.getProjectMilestones(id);
@@ -355,6 +362,16 @@ function ProjectDetail({ account }) {
               )}
 
               <div className="pt-4 border-t">
+                {/* Auto-Approval Timer */}
+                {milestone.status === 1 && milestone.submittedAt > 0 && (
+                  <AutoApproveTimer 
+                    projectId={id}
+                    milestoneId={milestone.id}
+                    submittedAt={milestone.submittedAt}
+                    onAutoApprove={loadProject}
+                  />
+                )}
+
                 {isFreelancer && milestone.status === 0 && project.status === 1 && (
                   <div className="space-y-3">
                     <input

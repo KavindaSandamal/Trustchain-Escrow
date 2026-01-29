@@ -1,4 +1,4 @@
-export const CONTRACT_ADDRESS = "0x13607A59Cd0D92a877E3C122D4ee82dca24f7F0C"; 
+export const CONTRACT_ADDRESS = "0x626A276B629f93d558Cd93a45B0A07047D61250A"; 
 
 export const AMOY_CHAIN_ID = 80002;
 export const AMOY_RPC = "https://rpc-amoy.polygon.technology";
