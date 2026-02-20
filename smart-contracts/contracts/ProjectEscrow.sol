@@ -1,14 +1,9 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 
-/**
- * @title ProjectEscrowImproved
- * @dev Enhanced escrow with auto-approval, multi-admin disputes, and emergency pause
- */
 contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
     // Enums for different states
     enum ProjectStatus {
@@ -68,8 +63,8 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
     uint256 public disputeCounter;
     uint256 public platformFeePercent = 2;
     uint256 public constant DISPUTE_TIMEOUT = 3 days;
-    uint256 public constant AUTO_APPROVE_TIMEOUT = 7 days; // NEW: Auto-approval after 7 days
-    uint256 public constant REQUIRED_ADMIN_VOTES = 2; // NEW: 2 out of 3 admins
+    uint256 public constant AUTO_APPROVE_TIMEOUT = 7 days;
+    uint256 public constant REQUIRED_ADMIN_VOTES = 2;
 
     // Mappings
     mapping(uint256 => Project) public projects;
@@ -78,8 +73,8 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
     mapping(address => uint256[]) public userProjects;
     mapping(address => uint256) public userRatings;
     mapping(address => uint256) public userRatingCount;
-    mapping(address => bool) public isAdmin; // NEW: Multi-admin system
-    address[] public adminList; // NEW: List of admins
+    mapping(address => bool) public isAdmin;
+    address[] public adminList;
 
     // Events
     event ProjectCreated(
@@ -98,7 +93,7 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         string deliverableHash
     );
     event MilestoneApproved(uint256 indexed projectId, uint256 milestoneId);
-    event MilestoneAutoApproved(uint256 indexed projectId, uint256 milestoneId); // NEW
+    event MilestoneAutoApproved(uint256 indexed projectId, uint256 milestoneId);
     event PaymentReleased(
         uint256 indexed projectId,
         uint256 milestoneId,
@@ -113,16 +108,16 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         uint256 indexed disputeId,
         address indexed admin,
         uint256 percentage
-    ); // NEW
+    );
     event DisputeResolved(
         uint256 indexed disputeId,
         uint256 percentageToFreelancer
     );
     event UserRated(address indexed user, uint256 rating);
-    event AdminAdded(address indexed admin); // NEW
-    event AdminRemoved(address indexed admin); // NEW
-    event ContractPaused(address indexed by); // NEW
-    event ContractUnpaused(address indexed by); // NEW
+    event AdminAdded(address indexed admin);
+    event AdminRemoved(address indexed admin);
+    event ContractPaused(address indexed by);
+    event ContractUnpaused(address indexed by);
 
     // Modifiers
     modifier onlyClient(uint256 _projectId) {
@@ -169,7 +164,7 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         adminList.push(msg.sender);
     }
 
-    // NEW: Admin management functions
+    // Admin management functions
     function addAdmin(address _admin) external onlyOwner {
         require(!isAdmin[_admin], "Already an admin");
         require(_admin != address(0), "Invalid address");
@@ -202,7 +197,7 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         return adminList;
     }
 
-    // NEW: Emergency pause functions
+    // Emergency pause functions
     function pause() external onlyOwner {
         _pause();
         emit ContractPaused(msg.sender);
@@ -213,9 +208,9 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         emit ContractUnpaused(msg.sender);
     }
 
-    /**
-     * @dev Create a new project with milestones
-     */
+    
+    // Create a new project with milestones
+     
     function createProject(
         string memory _title,
         string memory _descriptionHash,
@@ -280,9 +275,9 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         return projectId;
     }
 
-    /**
-     * @dev Freelancer accepts the project
-     */
+    
+    // Freelancer accepts the project
+    
     function acceptProject(
         uint256 _projectId
     ) external projectExists(_projectId) whenNotPaused {
@@ -306,9 +301,7 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         emit ProjectAccepted(_projectId, msg.sender);
     }
 
-    /**
-     * @dev Freelancer submits work for a milestone
-     */
+    // Freelancer submits work for a milestone
     function submitMilestone(
         uint256 _projectId,
         uint256 _milestoneId,
@@ -345,9 +338,8 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         emit MilestoneSubmitted(_projectId, _milestoneId, _deliverableHash);
     }
 
-    /**
-     * @dev Client approves milestone and releases payment
-     */
+    //Client approves milestone and releases payment
+
     function approveMilestone(
         uint256 _projectId,
         uint256 _milestoneId
@@ -376,10 +368,7 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         _releaseMilestonePayment(project, milestone, _projectId, _milestoneId);
     }
 
-    /**
-     * @dev NEW: Auto-approve milestone if client hasn't responded in 7 days
-     * Anyone can call this function
-     */
+    // Auto-approve milestone if client hasn't responded in 7 days Anyone can call this function
     function autoApproveMilestone(
         uint256 _projectId,
         uint256 _milestoneId
@@ -407,9 +396,8 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         _releaseMilestonePayment(project, milestone, _projectId, _milestoneId);
     }
 
-    /**
-     * @dev Internal function to release milestone payment
-     */
+    // Internal function to release milestone payment
+
     function _releaseMilestonePayment(
         Project storage project,
         Milestone storage milestone,
@@ -432,9 +420,8 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         }
     }
 
-    /**
-     * @dev Raise a dispute for a milestone
-     */
+    // Raise a dispute for a milestone
+
     function raiseDispute(
         uint256 _projectId,
         uint256 _milestoneId,
@@ -482,10 +469,9 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
 
         return disputeId;
     }
-
-    /**
-     * @dev NEW: Multi-admin dispute voting system
-     */
+*
+    // Multi-admin dispute voting system
+    
     function voteOnDispute(
         uint256 _disputeId,
         uint256 _percentageToFreelancer
@@ -508,9 +494,9 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         }
     }
 
-    /**
-     * @dev NEW: Execute dispute resolution based on average of votes
-     */
+    
+    // Execute dispute resolution based on average of votes
+     
     function _executeDisputeResolution(
         uint256 _disputeId
     ) internal nonReentrant {
@@ -554,9 +540,8 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         emit DisputeResolved(_disputeId, avgPercentage);
     }
 
-    /**
-     * @dev Rate a user after project completion
-     */
+    // Rate a user after project completion
+     
     function rateUser(address _user, uint256 _rating) external whenNotPaused {
         require(_rating >= 1 && _rating <= 5, "Rating must be between 1 and 5");
 
@@ -566,9 +551,9 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         emit UserRated(_user, _rating);
     }
 
-    /**
-     * @dev Cancel project before freelancer accepts
-     */
+    
+    // Cancel project before freelancer accepts
+     
     function cancelProject(
         uint256 _projectId
     )
@@ -592,35 +577,35 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         project.client.transfer(project.totalAmount);
     }
 
-    /**
-     * @dev Get all milestones for a project
-     */
+    
+    // Get all milestones for a project
+     
     function getProjectMilestones(
         uint256 _projectId
     ) external view projectExists(_projectId) returns (Milestone[] memory) {
         return projectMilestones[_projectId];
     }
 
-    /**
-     * @dev Get user's average rating
-     */
+    
+    // Get user's average rating
+     
     function getUserRating(address _user) external view returns (uint256) {
         if (userRatingCount[_user] == 0) return 0;
         return userRatings[_user] / userRatingCount[_user];
     }
 
-    /**
-     * @dev Get all projects for a user
-     */
+    
+    // Get all projects for a user
+     
     function getUserProjects(
         address _user
     ) external view returns (uint256[] memory) {
         return userProjects[_user];
     }
 
-    /**
-     * @dev Check if all milestones are approved
-     */
+    
+    // Check if all milestones are approved
+     
     function allMilestonesApproved(
         uint256 _projectId
     ) internal view returns (bool) {
@@ -633,24 +618,24 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
         return true;
     }
 
-    /**
-     * @dev Update platform fee (only owner)
-     */
+    
+    // Update platform fee (only owner)
+     
     function setPlatformFee(uint256 _feePercent) external onlyOwner {
         require(_feePercent <= 10, "Fee cannot exceed 10%");
         platformFeePercent = _feePercent;
     }
 
-    /**
-     * @dev Get contract balance
-     */
+    
+    // Get contract balance
+    
     function getContractBalance() external view returns (uint256) {
         return address(this).balance;
     }
 
-    /**
-     * @dev NEW: Check if milestone can be auto-approved
-     */
+    
+    // Check if milestone can be auto-approved
+    
     function canAutoApprove(
         uint256 _projectId,
         uint256 _milestoneId
@@ -666,9 +651,9 @@ contract ProjectEscrowImproved is ReentrancyGuard, Ownable, Pausable {
             block.timestamp >= milestone.submittedAt + AUTO_APPROVE_TIMEOUT);
     }
 
-    /**
-     * @dev NEW: Get dispute voting status
-     */
+    
+    // Get dispute voting status
+    
     function getDisputeVotes(
         uint256 _disputeId
     )

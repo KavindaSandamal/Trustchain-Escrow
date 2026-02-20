@@ -296,7 +296,7 @@ describe("ProjectEscrowImproved", function () {
       
       // Project should be completed
       const project = await escrow.projects(0);
-      expect(project.status).to.equal(2); // COMPLETED
+      expect(project.status).to.equal(2);
     });
   });
 
@@ -318,7 +318,7 @@ describe("ProjectEscrowImproved", function () {
       await escrow.connect(client).approveMilestone(0, 0);
       
       const project = await escrow.projects(0);
-      expect(project.status).to.equal(2); // COMPLETED
+      expect(project.status).to.equal(2);
     });
   });
 });

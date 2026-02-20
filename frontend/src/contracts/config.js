@@ -4,7 +4,7 @@ export const AMOY_CHAIN_ID = 80002;
 export const AMOY_RPC = "https://rpc-amoy.polygon.technology";
 
 export const NETWORK_CONFIG = {
-  chainId: `0x${AMOY_CHAIN_ID.toString(16)}`, // 0x13882
+  chainId: `0x${AMOY_CHAIN_ID.toString(16)}`, 
   chainName: 'Polygon Amoy Testnet',
   nativeCurrency: {
     name: 'POL',
